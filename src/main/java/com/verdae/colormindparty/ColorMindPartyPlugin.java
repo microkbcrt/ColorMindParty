@@ -1,5 +1,8 @@
 package com.verdae.colormindparty;
 
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import io.papermc.paper.math.Position;
 import org.bukkit.Difficulty;
 import org.bukkit.HeightMap;
@@ -102,7 +105,7 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
 
         minPlayers = Math.max(1, getConfig().getInt("settings.min-players", 5));
         countdownSeconds = Math.max(5, getConfig().getInt("settings.countdown-seconds", 30));
-        protectionChance = Math.max(0.0, Math.min(1.0, getConfig().getDouble("settings.protection-chance", 0.18)));
+        protectionChance = Math.max(0.0, Math.min(1.0, getConfig().getDouble("settings.protection-chance", 0.22)));
         recoverySeconds = Math.max(1, getConfig().getInt("settings.recovery-seconds", 3));
 
         loadPalettes();
@@ -567,7 +570,14 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
             ));
             p.playSound(p.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.2f);
         }
+
+        session.initialAliveCount = Math.max(1, session.alive.size());
+        session.pvpTitleShown = false;
+        createAliveBossBar(session);
+        updateAliveBossBar(session);
+
         updateScoreboards(session);
+        updateAliveBossBar(session);
         startRound(session);
     }
 
@@ -584,6 +594,8 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         session.actionbarTask = null;
 
         session.round++;
+
+        boolean wasPvpEnabled = session.pvpEnabled;
         session.pvpEnabled = session.round >= 11;
         session.finalCheckStarted = false;
 
@@ -598,9 +610,23 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
             p.getInventory().clear();
             p.sendActionBar(Component.empty());
             p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 0.7f, 1.2f);
+
+            if (!wasPvpEnabled && session.pvpEnabled && !session.pvpTitleShown) {
+                p.showTitle(Title.title(
+                        Component.text("PVP 已开启！", NamedTextColor.RED),
+                        Component.text("可以击退其他玩家", NamedTextColor.GOLD),
+                        Title.Times.times(Duration.ofMillis(150), Duration.ofMillis(1800), Duration.ofMillis(350))
+                ));
+                p.playSound(p.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 0.6f, 1.4f);
+            }
         }
+
+        if (!wasPvpEnabled && session.pvpEnabled) {
+            session.pvpTitleShown = true;
+        }
+
         updateScoreboards(session);
-        broadcast(session, ChatColor.LIGHT_PURPLE + "第 " + session.round + " 回合：" + ChatColor.YELLOW + session.currentTargetName + ChatColor.GRAY + "（" + plan.palette.name + " / " + plan.pattern.displayName + "）");
+        updateAliveBossBar(session);
 
         long freeTicks = secondsToTicks(freeRunSeconds(session.round));
         if (freeTicks > 0) {
@@ -687,12 +713,14 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
             }, 100L);
         }
         updateScoreboards(session);
+        updateAliveBossBar(session);
     }
 
     private void endGame(GameSession session, UUID winner, boolean noSurvivor) {
         if (session.state == GameState.RECOVERING || session.state == GameState.IDLE) return;
         session.state = GameState.RECOVERING;
         cancelGameTasks(session);
+        clearAliveBossBar(session);
 
         String winnerName = winner == null ? null : playerName(winner);
         String mainTitle = noSurvivor || winner == null ? "无人幸存" : winnerName + " 获胜！";
@@ -725,6 +753,7 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         if (session.state == GameState.IDLE) return;
         session.state = GameState.RECOVERING;
         cancelGameTasks(session);
+        clearAliveBossBar(session);
         for (UUID uuid : new LinkedHashSet<>(session.participants)) {
             Player p = Bukkit.getPlayer(uuid);
             if (p == null) continue;
@@ -763,6 +792,12 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         player.teleport(target);
         player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
         player.sendActionBar(Component.empty());
+
+        for (GameSession session : sessions.values()) {
+            if (session.aliveBossBar != null) {
+                session.aliveBossBar.removePlayer(player);
+            }
+        }
     }
 
     private void removeFromSession(GameSession session, UUID uuid, boolean broadcastLeave) {
@@ -780,6 +815,46 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         updateScoreboards(session);
     }
 
+    private void createAliveBossBar(GameSession session) {
+        clearAliveBossBar(session);
+        session.aliveBossBar = Bukkit.createBossBar("幸存玩家", BarColor.PURPLE, BarStyle.SOLID);
+        session.aliveBossBar.setVisible(true);
+
+        for (UUID uuid : session.participants) {
+            Player p = Bukkit.getPlayer(uuid);
+            if (p != null) {
+                session.aliveBossBar.addPlayer(p);
+            }
+        }
+    }
+
+    private void updateAliveBossBar(GameSession session) {
+        if (session.aliveBossBar == null) return;
+
+        int alive = session.alive.size();
+        int total = Math.max(1, session.initialAliveCount);
+        double progress = Math.max(0.0, Math.min(1.0, alive / (double) total));
+
+        session.aliveBossBar.setTitle("幸存玩家 " + alive + " / " + total);
+        session.aliveBossBar.setProgress(progress);
+        session.aliveBossBar.setVisible(session.state == GameState.RUNNING);
+
+        for (UUID uuid : session.participants) {
+            Player p = Bukkit.getPlayer(uuid);
+            if (p != null) {
+                session.aliveBossBar.addPlayer(p);
+            }
+        }
+    }
+
+    private void clearAliveBossBar(GameSession session) {
+        if (session.aliveBossBar != null) {
+            session.aliveBossBar.removeAll();
+            session.aliveBossBar.setVisible(false);
+            session.aliveBossBar = null;
+        }
+    }
+    
     private void eliminate(GameSession session, UUID uuid, String reason, boolean teleportSpectator) {
         if (!session.alive.remove(uuid)) return;
         if (!session.eliminatedOrder.contains(uuid)) session.eliminatedOrder.add(uuid);
@@ -795,6 +870,7 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
             player.sendMessage(prefix() + ChatColor.RED + "你已失败：" + reason);
         }
         updateScoreboards(session);
+        updateAliveBossBar(session);
         checkEndCondition(session);
     }
 
@@ -1161,15 +1237,14 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         Objective obj = board.registerNewObjective("cm", Criteria.DUMMY, Component.text("色盲派对", NamedTextColor.LIGHT_PURPLE));
         obj.setDisplaySlot(DisplaySlot.SIDEBAR);
 
-        int alive = session.alive.size();
-        String roundText = session.state == GameState.RUNNING ? "第" + session.round + "回合" : (session.state == GameState.COUNTDOWN ? "倒计时 " + session.countdownLeft + "秒" : "等待中");
-        String target = session.currentTargetName == null || session.currentTargetName.isBlank() ? "未开始" : session.currentTargetName + "色";
+        String roundText = session.state == GameState.RUNNING
+                ? "第 " + session.round + " 回合"
+                : (session.state == GameState.COUNTDOWN ? "倒计时 " + session.countdownLeft + " 秒" : "等待中");
 
-        obj.getScore(ChatColor.LIGHT_PURPLE + "色盲派对").setScore(5);
-        obj.getScore(ChatColor.YELLOW + roundText).setScore(4);
-        obj.getScore(ChatColor.GREEN + "幸存 " + alive).setScore(3);
-        obj.getScore(ChatColor.AQUA + target).setScore(2);
+        obj.getScore(ChatColor.YELLOW + roundText).setScore(3);
+        obj.getScore(ChatColor.GRAY + "地图 " + session.arena.displayName).setScore(2);
         obj.getScore(ChatColor.DARK_GRAY + " ").setScore(1);
+
         player.setScoreboard(board);
     }
 
@@ -1516,6 +1591,7 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
 
     private void resetToIdle(GameSession session) {
         cancelGameTasks(session);
+        clearAliveBossBar(session);
         session.state = GameState.IDLE;
         session.lobbyPlayers.clear();
         session.participants.clear();
@@ -1527,8 +1603,10 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         session.currentTargetName = "";
         session.currentPaletteName = "";
         session.pvpEnabled = false;
+        session.pvpTitleShown = false;
         session.forcedCountdown = false;
         session.finalCheckStarted = false;
+        session.initialAliveCount = 0;
     }
 
     private void cancelGameTasks(GameSession session) {
@@ -1558,7 +1636,10 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
 
     private double colorCountdownSeconds(int round) {
         if (round <= 11) return 5.0;
-        return Math.max(1.0, 5.0 - (round - 11) * (4.0 / 9.0));
+
+        // 第 12-20 回合从 5.0 秒逐渐压缩到 2.0 秒；
+        // 第 20 回合及以后固定 2.0 秒，不再继续压缩。
+        return Math.max(2.0, 5.0 - (round - 11) * (3.0 / 9.0));
     }
 
     private long secondsToTicks(double seconds) {
@@ -1757,13 +1838,16 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
 
         boolean forcedCountdown;
         boolean pvpEnabled;
+        boolean pvpTitleShown;
         boolean finalCheckStarted;
         int countdownLeft;
         int round;
         int phaseTicksLeft;
+        int initialAliveCount;
         Material currentTarget;
         String currentTargetName = "";
         String currentPaletteName = "";
+        BossBar aliveBossBar;
 
         GameSession(Arena arena) {
             this.arena = arena;
