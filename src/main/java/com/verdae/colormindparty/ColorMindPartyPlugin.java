@@ -1,9 +1,7 @@
 package com.verdae.colormindparty;
 
-import org.bukkit.boss.BarColor;
-import org.bukkit.boss.BarStyle;
-import org.bukkit.boss.BossBar;
 import io.papermc.paper.math.Position;
+import net.kyori.adventure.bossbar.BossBar;
 import org.bukkit.Difficulty;
 import org.bukkit.HeightMap;
 import org.bukkit.generator.ChunkGenerator;
@@ -555,7 +553,10 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         session.finalCheckStarted = false;
         session.currentTarget = null;
         session.currentTargetName = "";
+        session.currentPaletteName = "";
         session.pvpEnabled = false;
+        session.pvpTitleShown = false;
+        session.initialAliveCount = 0;
 
         for (Player p : players) {
             session.participants.add(p.getUniqueId());
@@ -577,7 +578,6 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         updateAliveBossBar(session);
 
         updateScoreboards(session);
-        updateAliveBossBar(session);
         startRound(session);
     }
 
@@ -795,7 +795,7 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
 
         for (GameSession session : sessions.values()) {
             if (session.aliveBossBar != null) {
-                session.aliveBossBar.removePlayer(player);
+                player.hideBossBar(session.aliveBossBar);
             }
         }
     }
@@ -813,17 +813,26 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
             resetToIdle(session);
         }
         updateScoreboards(session);
+        updateAliveBossBar(session);
     }
 
     private void createAliveBossBar(GameSession session) {
         clearAliveBossBar(session);
-        session.aliveBossBar = Bukkit.createBossBar("幸存玩家", BarColor.PURPLE, BarStyle.SOLID);
-        session.aliveBossBar.setVisible(true);
+        session.aliveBossBar = BossBar.bossBar(
+                Component.text("幸存玩家 " + session.alive.size() + " / " + Math.max(1, session.initialAliveCount), NamedTextColor.LIGHT_PURPLE),
+                1.0f,
+                BossBar.Color.PURPLE,
+                BossBar.Overlay.PROGRESS
+        );
+        showAliveBossBar(session);
+    }
 
+    private void showAliveBossBar(GameSession session) {
+        if (session.aliveBossBar == null) return;
         for (UUID uuid : session.participants) {
             Player p = Bukkit.getPlayer(uuid);
             if (p != null) {
-                session.aliveBossBar.addPlayer(p);
+                p.showBossBar(session.aliveBossBar);
             }
         }
     }
@@ -833,24 +842,31 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
 
         int alive = session.alive.size();
         int total = Math.max(1, session.initialAliveCount);
-        double progress = Math.max(0.0, Math.min(1.0, alive / (double) total));
+        float progress = (float) Math.max(0.0, Math.min(1.0, alive / (double) total));
 
-        session.aliveBossBar.setTitle("幸存玩家 " + alive + " / " + total);
-        session.aliveBossBar.setProgress(progress);
-        session.aliveBossBar.setVisible(session.state == GameState.RUNNING);
+        session.aliveBossBar.name(Component.text("幸存玩家 " + alive + " / " + total, NamedTextColor.LIGHT_PURPLE));
+        session.aliveBossBar.progress(progress);
 
+        if (session.state == GameState.RUNNING) {
+            showAliveBossBar(session);
+        } else {
+            hideAliveBossBar(session);
+        }
+    }
+
+    private void hideAliveBossBar(GameSession session) {
+        if (session.aliveBossBar == null) return;
         for (UUID uuid : session.participants) {
             Player p = Bukkit.getPlayer(uuid);
             if (p != null) {
-                session.aliveBossBar.addPlayer(p);
+                p.hideBossBar(session.aliveBossBar);
             }
         }
     }
 
     private void clearAliveBossBar(GameSession session) {
         if (session.aliveBossBar != null) {
-            session.aliveBossBar.removeAll();
-            session.aliveBossBar.setVisible(false);
+            hideAliveBossBar(session);
             session.aliveBossBar = null;
         }
     }
