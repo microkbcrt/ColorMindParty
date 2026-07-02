@@ -1,0 +1,9 @@
+# ColorMindParty 自动保存配置。
+# 推荐只通过 /cm 命令修改，不要手动编辑坐标。
+settings:
+  min-players: 5
+  countdown-seconds: 30
+  protection-chance: 0.18
+  recovery-seconds: 3
+survival: {}
+arenas: {}

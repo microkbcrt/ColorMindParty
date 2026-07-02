@@ -1,0 +1,16 @@
+name: ColorMindParty
+version: '1.0.0'
+main: com.verdae.colormindparty.ColorMindPartyPlugin
+api-version: '26.2'
+author: Verdae
+commands:
+  cm:
+    description: 色盲派对主命令
+    usage: /cm <join|quit|create|edit|save|register|unregister|set|setblock|setlobby|setspawn>
+  cmforce:
+    description: 色盲派对强制管理命令
+    usage: /cmforce <start|stop> [地图名称]
+permissions:
+  colormindparty.admin:
+    description: 允许配置、注册、强制开始/停止色盲派对
+    default: op
