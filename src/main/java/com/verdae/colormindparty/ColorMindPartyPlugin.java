@@ -1,5 +1,10 @@
 package com.verdae.colormindparty;
 
+import io.papermc.paper.math.Position;
+import org.bukkit.Difficulty;
+import org.bukkit.HeightMap;
+import org.bukkit.generator.ChunkGenerator;
+import org.bukkit.generator.WorldInfo;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.title.Title;
@@ -72,7 +77,9 @@ import java.util.stream.Collectors;
  * 目标：Paper 26.2 alpha API；尽量只使用 Bukkit/Paper 稳定 API。
  */
 public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
-
+    private static final int EDIT_PLATFORM_Y = 80;
+    private static final int EDIT_PLATFORM_RADIUS = 4;
+    private static final ChunkGenerator VOID_CHUNK_GENERATOR = new VoidChunkGenerator();
     private final Map<String, Arena> arenas = new LinkedHashMap<>();
     private final Map<String, GameSession> sessions = new HashMap<>();
     private final Map<UUID, String> editingArena = new HashMap<>();
@@ -348,13 +355,14 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         }
 
         String worldName = "cm_" + key;
-        World world = Bukkit.createWorld(new WorldCreator(worldName));
+        World world = Bukkit.createWorld(voidWorldCreator(worldName));
         if (world == null) {
             error(player, "世界创建失败。请检查服务端日志。 ");
             return;
         }
-        world.setGameRule(GameRule.KEEP_INVENTORY, true);
-        world.setGameRule(GameRule.DO_IMMEDIATE_RESPAWN, true);
+
+        configureArenaWorld(world);
+        createEditPlatform(world);
 
         Arena arena = new Arena(key, rawName, worldName);
         arenas.put(key, arena);
@@ -362,11 +370,11 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         editingArena.put(player.getUniqueId(), key);
         saveData();
 
-        Location target = world.getSpawnLocation().add(0.5, 1.0, 0.5);
+        Location target = editPlatformSpawn(world);
         player.teleport(target);
         player.setGameMode(GameMode.CREATIVE);
-        player.sendMessage(prefix() + ChatColor.GREEN + "已创建地图 " + rawName + " 并进入编辑世界：" + worldName);
-        player.sendMessage(prefix() + ChatColor.GRAY + "搭好场地后依次设置 setblock/start/end、setlobby、setspawn、set deathspawn。 ");
+        player.sendMessage(prefix() + ChatColor.GREEN + "已创建虚空地图 " + rawName + " 并进入编辑世界：" + worldName);
+        player.sendMessage(prefix() + ChatColor.GRAY + "已在原点生成 9x9 小平台。搭好场地后依次设置 setblock/start/end、setlobby、setspawn、set deathspawn。 ");
     }
 
     private void editArena(Player player, String rawName) {
@@ -1317,6 +1325,119 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
     // Utility
     // ---------------------------------------------------------------------
 
+    private WorldCreator voidWorldCreator(String worldName) {
+        return new WorldCreator(worldName)
+                .environment(World.Environment.NORMAL)
+                .generator(VOID_CHUNK_GENERATOR)
+                .generateStructures(false)
+                .bonusChest(false)
+                .forcedSpawnPosition(Position.block(0, EDIT_PLATFORM_Y + 2, 0), 0.0f, 0.0f);
+    }
+
+    private void configureArenaWorld(World world) {
+        world.setGameRule(GameRule.KEEP_INVENTORY, true);
+        world.setGameRule(GameRule.DO_IMMEDIATE_RESPAWN, true);
+        world.setGameRule(GameRule.DO_MOB_SPAWNING, false);
+        world.setGameRule(GameRule.DO_PATROL_SPAWNING, false);
+        world.setGameRule(GameRule.DO_TRADER_SPAWNING, false);
+        world.setGameRule(GameRule.DO_WEATHER_CYCLE, false);
+        world.setGameRule(GameRule.DO_DAYLIGHT_CYCLE, false);
+
+        world.setDifficulty(Difficulty.PEACEFUL);
+        world.setTime(6000L);
+        world.setSpawnLocation(0, EDIT_PLATFORM_Y + 2, 0);
+    }
+
+    private Location editPlatformSpawn(World world) {
+        return new Location(world, 0.5, EDIT_PLATFORM_Y + 2.0, 0.5, 0.0f, 0.0f);
+    }
+
+    private void createEditPlatform(World world) {
+        int y = EDIT_PLATFORM_Y;
+        Material platform = safeMaterial("SMOOTH_QUARTZ", Material.STONE);
+        Material center = safeMaterial("SEA_LANTERN", Material.GLOWSTONE);
+
+        for (int x = -EDIT_PLATFORM_RADIUS; x <= EDIT_PLATFORM_RADIUS; x++) {
+            for (int z = -EDIT_PLATFORM_RADIUS; z <= EDIT_PLATFORM_RADIUS; z++) {
+                Material material = (x == 0 && z == 0) ? center : platform;
+                world.getBlockAt(x, y, z).setType(material, false);
+            }
+        }
+
+        // 简单标记出生点，方便管理员知道自己站在哪里。
+        world.getBlockAt(0, y + 1, -EDIT_PLATFORM_RADIUS).setType(Material.TORCH, false);
+        world.getBlockAt(0, y + 1, EDIT_PLATFORM_RADIUS).setType(Material.TORCH, false);
+        world.getBlockAt(-EDIT_PLATFORM_RADIUS, y + 1, 0).setType(Material.TORCH, false);
+        world.getBlockAt(EDIT_PLATFORM_RADIUS, y + 1, 0).setType(Material.TORCH, false);
+    }
+
+    private static final class VoidChunkGenerator extends ChunkGenerator {
+        @Override
+        public int getBaseHeight(WorldInfo worldInfo, Random random, int x, int z, HeightMap heightMap) {
+            return worldInfo.getMinHeight();
+        }
+
+        @Override
+        public boolean shouldGenerateNoise() {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateSurface() {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateCaves() {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateDecorations() {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateMobs() {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateStructures() {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateNoise(WorldInfo worldInfo, Random random, int chunkX, int chunkZ) {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateSurface(WorldInfo worldInfo, Random random, int chunkX, int chunkZ) {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateCaves(WorldInfo worldInfo, Random random, int chunkX, int chunkZ) {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateDecorations(WorldInfo worldInfo, Random random, int chunkX, int chunkZ) {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateMobs(WorldInfo worldInfo, Random random, int chunkX, int chunkZ) {
+            return false;
+        }
+
+        @Override
+        public boolean shouldGenerateStructures(WorldInfo worldInfo, Random random, int chunkX, int chunkZ) {
+            return false;
+        }
+    }
+    
     private String prefix() {
         return ChatColor.LIGHT_PURPLE + "[色盲派对] " + ChatColor.RESET;
     }
@@ -1351,8 +1472,16 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
 
     private World ensureWorld(String worldName) {
         World world = Bukkit.getWorld(worldName);
-        if (world != null) return world;
-        return Bukkit.createWorld(new WorldCreator(worldName));
+        if (world != null) {
+            configureArenaWorld(world);
+            return world;
+        }
+
+        World created = Bukkit.createWorld(voidWorldCreator(worldName));
+        if (created != null) {
+            configureArenaWorld(created);
+        }
+        return created;
     }
 
     private boolean sameWorld(Location a, Location b) {
