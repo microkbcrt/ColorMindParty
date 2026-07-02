@@ -1,0 +1,111 @@
+name: Build ColorMindParty
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-colormindparty-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Paper Plugin
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Show Java and Maven versions
+        run: |
+          java -version
+          mvn -version
+
+      # 兼容两种仓库结构：
+      # 1. 标准 Maven 结构：
+      #    src/main/java/com/verdae/colormindparty/ColorMindPartyPlugin.java
+      #    src/main/resources/plugin.yml
+      #    src/main/resources/config.yml
+      #
+      # 2. 当前你上传给我的扁平结构：
+      #    ColorMindPartyPlugin.java
+      #    plugin.yml
+      #    config.yml
+      - name: Normalize Maven project layout
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MAIN_CLASS_PATH="src/main/java/com/verdae/colormindparty/ColorMindPartyPlugin.java"
+          RESOURCE_DIR="src/main/resources"
+
+          mkdir -p "src/main/java/com/verdae/colormindparty"
+          mkdir -p "${RESOURCE_DIR}"
+
+          if [[ ! -f "${MAIN_CLASS_PATH}" && -f "ColorMindPartyPlugin.java" ]]; then
+            echo "Detected root ColorMindPartyPlugin.java, copying to Maven source path..."
+            cp "ColorMindPartyPlugin.java" "${MAIN_CLASS_PATH}"
+          fi
+
+          if [[ ! -f "${RESOURCE_DIR}/plugin.yml" && -f "plugin.yml" ]]; then
+            echo "Detected root plugin.yml, copying to Maven resources..."
+            cp "plugin.yml" "${RESOURCE_DIR}/plugin.yml"
+          fi
+
+          if [[ ! -f "${RESOURCE_DIR}/config.yml" && -f "config.yml" ]]; then
+            echo "Detected root config.yml, copying to Maven resources..."
+            cp "config.yml" "${RESOURCE_DIR}/config.yml"
+          fi
+
+          test -f "pom.xml"
+          test -f "${MAIN_CLASS_PATH}"
+          test -f "${RESOURCE_DIR}/plugin.yml"
+          test -f "${RESOURCE_DIR}/config.yml"
+
+          echo "Maven layout is ready."
+
+      - name: Build with Maven
+        run: mvn -B -ntp clean package
+
+      - name: Verify plugin jar
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          JAR_FILE="$(ls target/ColorMindParty-*.jar | head -n 1)"
+
+          echo "Built jar: ${JAR_FILE}"
+
+          jar tf "${JAR_FILE}" | grep -q "^plugin.yml$"
+          jar tf "${JAR_FILE}" | grep -q "^config.yml$"
+          jar tf "${JAR_FILE}" | grep -q "^com/verdae/colormindparty/ColorMindPartyPlugin.class$"
+
+          echo "Jar verification passed."
+
+      - name: Upload plugin jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: ColorMindParty-${{ github.sha }}
+          path: target/ColorMindParty-*.jar
+          if-no-files-found: error
+          retention-days: 30
