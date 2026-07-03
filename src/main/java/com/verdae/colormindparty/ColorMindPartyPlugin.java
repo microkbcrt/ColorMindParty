@@ -596,7 +596,7 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         session.round++;
 
         boolean wasPvpEnabled = session.pvpEnabled;
-        session.pvpEnabled = session.round >= 11;
+        session.pvpEnabled = session.round >= 12;
         session.finalCheckStarted = false;
 
         int maxColors = maxColorsForRound(session.round);
@@ -613,8 +613,8 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
 
             if (!wasPvpEnabled && session.pvpEnabled && !session.pvpTitleShown) {
                 p.showTitle(Title.title(
-                        Component.text("PVP 已开启！", NamedTextColor.RED),
-                        Component.text("可以击退其他玩家", NamedTextColor.GOLD),
+                        Component.text("击退开启！", NamedTextColor.RED),
+                        Component.text("现在可以击退其他玩家", NamedTextColor.GOLD),
                         Title.Times.times(Duration.ofMillis(150), Duration.ofMillis(1800), Duration.ofMillis(350))
                 ));
                 p.playSound(p.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 0.6f, 1.4f);
@@ -1187,14 +1187,20 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
         Arena arena = session.arena;
         World world = arena.world();
         if (world == null) return;
+
+        // 颜色保护永远以玩家脚下的 X/Z 为中心，但写入高度固定为色盲派对地板层。
+        // 这样玩家跳起来右键时，也只会在地板同一层生成 3x3 平台，不会在玩家所在高度生成“空中平台”。
         int cx = loc.getBlockX();
         int cz = loc.getBlockZ();
         int y = arena.floorY();
+
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 int x = cx + dx;
                 int z = cz + dz;
-                if (arena.contains(x, z)) world.getBlockAt(x, y, z).setType(target, false);
+                if (arena.contains(x, z)) {
+                    world.getBlockAt(x, y, z).setType(target, false);
+                }
             }
         }
     }
@@ -1646,16 +1652,14 @@ public final class ColorMindPartyPlugin extends JavaPlugin implements Listener, 
     }
 
     private double freeRunSeconds(int round) {
-        if (round >= 11) return 0.0;
-        return Math.max(0.5, 5.0 - (round - 1) * 0.5);
+        // 第 1-12 回合自由跑动时间从 10 秒线性压缩到 0 秒；第 12 回合起不再给自由跑动时间。
+        if (round >= 12) return 0.0;
+        return Math.max(0.0, 10.0 - (round - 1) * (10.0 / 11.0));
     }
 
     private double colorCountdownSeconds(int round) {
-        if (round <= 11) return 5.0;
-
-        // 第 12-20 回合从 5.0 秒逐渐压缩到 2.0 秒；
-        // 第 20 回合及以后固定 2.0 秒，不再继续压缩。
-        return Math.max(2.0, 5.0 - (round - 11) * (3.0 / 9.0));
+        // 状态栏看色倒计时固定 5 秒，不再随回合压缩。
+        return 5.0;
     }
 
     private long secondsToTicks(double seconds) {
